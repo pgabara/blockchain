@@ -58,10 +58,12 @@ impl Blockchain {
         }
     }
 
-    pub fn add_block(&mut self, data: String) {
+    pub fn mine_block(&mut self, data: String) -> usize {
         let previous_hash = self.chain.last().unwrap().hash.clone();
         let new_block = Block::new(self.chain.len(), data, previous_hash, self.difficulty);
+        let index = new_block.index;
         self.chain.push(new_block);
+        index
     }
 
     pub fn try_replace_chain(&mut self, new_chain: Vec<Block>) -> bool {
@@ -113,7 +115,7 @@ mod tests {
     #[test]
     fn test_add_new_block_to_blockchain() {
         let mut blockchain = Blockchain::new(1);
-        blockchain.add_block("Test Block".to_string());
+        blockchain.mine_block("Test Block".to_string());
         let genesis_block = blockchain.chain.first().unwrap();
         let new_block = blockchain.chain.last().unwrap();
         assert_eq!(new_block.index, 1);
@@ -148,8 +150,8 @@ mod tests {
     #[test]
     fn test_is_valid_chain() {
         let mut blockchain = Blockchain::new(1);
-        blockchain.add_block("Test Block 1".to_string());
-        blockchain.add_block("Test Block 2".to_string());
+        blockchain.mine_block("Test Block 1".to_string());
+        blockchain.mine_block("Test Block 2".to_string());
         let other_chain = &blockchain.chain;
         assert!(blockchain.is_valid_chain(other_chain));
     }
@@ -170,8 +172,8 @@ mod tests {
     #[test]
     fn test_try_replace_chain_with_shorter_chain() {
         let mut blockchain = Blockchain::new(1);
-        blockchain.add_block("Test Block 1".to_string());
-        blockchain.add_block("Test Block 2".to_string());
+        blockchain.mine_block("Test Block 1".to_string());
+        blockchain.mine_block("Test Block 2".to_string());
         let other_chain = vec![blockchain.chain[0].clone()];
 
         let is_chain_replaced = blockchain.try_replace_chain(other_chain);
@@ -182,8 +184,8 @@ mod tests {
     #[test]
     fn test_try_replace_chain() {
         let mut blockchain = Blockchain::new(1);
-        blockchain.add_block("Test Block 1".to_string());
-        blockchain.add_block("Test Block 2".to_string());
+        blockchain.mine_block("Test Block 1".to_string());
+        blockchain.mine_block("Test Block 2".to_string());
         let other_chain = blockchain.chain.clone();
         blockchain.chain.remove(2);
 

@@ -2,10 +2,19 @@ use crate::blockchain::Block;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 #[serde(tag = "type", content = "data")]
-pub enum PeerMessage {
+pub enum PeerRequest {
     GetChainRequest,
-    GetChainResponse(Vec<Block>),
     AddBlockRequest(String),
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct GetChainResponse {
+    pub chain: Vec<Block>,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct AddBlockResponse {
+    pub index: usize,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -14,6 +23,4 @@ pub enum PeerError {
     SocketError(#[from] std::io::Error),
     #[error("Invalid request: {0}")]
     InvalidMessage(#[from] serde_json::error::Error),
-    #[error("Unsupported message type")]
-    UnsupportedMessageType,
 }
