@@ -1,35 +1,20 @@
-use std::net::{SocketAddr, TcpListener};
-use tokio::task::JoinHandle;
+pub mod server;
 
-use blockchain::args::Args;
-use blockchain::node;
+pub async fn repeat_until<T, R, F, P>(future: F, predicate: P, max_times: u8) -> T
+where
+    F: Fn() -> R + Sized,
+    R: Future<Output = T>,
+    P: Fn(&T) -> bool,
+{
+    let mut max_times = max_times;
+    loop {
+        let result = future().await;
 
-pub struct TestServer {
-    handle: JoinHandle<()>,
-    pub addr: SocketAddr,
-}
+        if predicate(&result) || max_times == 0 {
+            return result;
+        }
 
-impl Drop for TestServer {
-    fn drop(&mut self) {
-        self.handle.abort()
+        max_times -= 1;
+        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     }
-}
-
-pub async fn start_node() -> TestServer {
-    let addr = get_server_addr();
-    let args = Args {
-        seed_node: None,
-        port: addr.port(),
-        difficulty: 1,
-    };
-    let handle = tokio::spawn(async {
-        node::start(args).await.expect("Could not start server");
-    });
-    tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-    TestServer { handle, addr }
-}
-
-fn get_server_addr() -> SocketAddr {
-    let listener = TcpListener::bind(("127.0.0.1", 0)).expect("Failed to bind random port");
-    listener.local_addr().expect("Failed to get local address")
 }

@@ -2,9 +2,11 @@ mod helpers;
 
 use blockchain::network::client;
 
+use helpers::server::start_node;
+
 #[tokio::test]
 async fn get_chain() {
-    let server = helpers::start_node().await;
+    let server = start_node().await;
 
     let chain = client::get_chain(server.addr)
         .await
@@ -15,7 +17,7 @@ async fn get_chain() {
 
 #[tokio::test]
 async fn mine_blocks() {
-    let server = helpers::start_node().await;
+    let server = start_node().await;
 
     let block_index_1 = client::mine_block(String::from("Test Block 1"), server.addr)
         .await
