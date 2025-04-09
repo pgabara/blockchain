@@ -1,3 +1,4 @@
 pub mod args;
-pub mod blockchain;
+mod blockchain;
 pub mod network;
+pub mod node;
