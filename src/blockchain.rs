@@ -2,7 +2,7 @@ use sha2::{Digest, Sha256};
 
 #[derive(PartialEq, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Block {
-    index: usize,
+    pub index: usize,
     timestamp: i64,
     data: String,
     previous_hash: String,
@@ -58,12 +58,20 @@ impl Blockchain {
         }
     }
 
-    pub fn mine_block(&mut self, data: String) -> usize {
+    pub fn add_block(&mut self, block: Block) -> bool {
+        let last_block = self.chain.last().unwrap();
+        if block.previous_hash == last_block.hash && block.index == last_block.index + 1 {
+            self.chain.push(block);
+            return true;
+        }
+        false
+    }
+
+    pub fn mine_block(&mut self, data: String) -> &Block {
         let previous_hash = self.chain.last().unwrap().hash.clone();
         let new_block = Block::new(self.chain.len(), data, previous_hash, self.difficulty);
-        let index = new_block.index;
         self.chain.push(new_block);
-        index
+        self.chain.last().unwrap()
     }
 
     pub fn try_replace_chain(&mut self, new_chain: Vec<Block>) -> bool {
