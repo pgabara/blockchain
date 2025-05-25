@@ -22,7 +22,7 @@ async fn synchronize_joining_node() {
     let get_chain = || async {
         client::get_chain(node_2.addr)
             .await
-            .expect("Failed to get chain")
+            .expect("Failed to get the chain")
     };
 
     let chain = repeat_until(get_chain, |n| n.len() == 3, 5).await;
@@ -41,7 +41,7 @@ async fn broadcast_new_blocks() {
     let get_chain = || async {
         client::get_chain(node_1.addr)
             .await
-            .expect("Failed to get chain")
+            .expect("Failed to get the chain")
     };
 
     let chain = repeat_until(get_chain, |n| n.len() == 2, 5).await;
@@ -54,7 +54,7 @@ async fn broadcast_new_blocks() {
     let get_chain = || async {
         client::get_chain(node_2.addr)
             .await
-            .expect("Failed to get chain")
+            .expect("Failed to get a chain")
     };
 
     let chain = repeat_until(get_chain, |n| n.len() == 3, 5).await;

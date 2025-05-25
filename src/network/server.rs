@@ -1,7 +1,7 @@
 use crate::blockchain::{Block, Blockchain};
 use crate::network::message::*;
 use crate::node::Node;
-use crate::sync;
+use crate::node::broadcast::NodeStateBroadcast;
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -15,7 +15,7 @@ pub async fn start_server(
     node: Arc<Mutex<Node>>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     let listener = TcpListener::bind(("0.0.0.0", port)).await?;
-    tracing::debug!("Server listening on port {}", port);
+    tracing::debug!("Server is listening on port {}", port);
 
     loop {
         let (socket, addr) = listener.accept().await?;
@@ -25,14 +25,13 @@ pub async fn start_server(
     }
 }
 
-#[tracing::instrument(skip(socket, blockchain, node))]
 async fn accept_socket(
     mut socket: TcpStream,
     addr: SocketAddr,
     blockchain: Arc<Mutex<Blockchain>>,
     node: Arc<Mutex<Node>>,
 ) -> Result<(), PeerError> {
-    tracing::debug!("Accepted new connection from {:?}", addr);
+    tracing::debug!("Accepted new connection from {}", addr);
 
     let mut buffer = vec![0u8; 8192];
     let read_bytes = socket.read(&mut buffer).await?;
@@ -42,6 +41,7 @@ async fn accept_socket(
 
     match message {
         PeerRequest::Join(addr) => join(node, addr, &mut socket).await,
+        PeerRequest::PeerList(peers) => peer_list(peers, node, &mut socket).await,
         PeerRequest::GetChain => get_chain(blockchain, &mut socket).await,
         PeerRequest::AddBlock(block) => add_block(block, blockchain, &mut socket).await,
         PeerRequest::MineBlock(data) => mine_block(data, blockchain, node, &mut socket).await,
@@ -54,11 +54,24 @@ async fn join(
     socket: &mut TcpStream,
 ) -> Result<(), PeerError> {
     let mut node = node.lock().await;
-    let peers = &node.peers;
-    let peers: Vec<_> = peers.iter().map(|p| p.addr).collect();
-    node.add_peer(addr);
+    node.add_peers(&[addr]);
+    let peers: Vec<SocketAddr> = node.cluster_peers().iter().map(|p| p.addr).collect();
     let response = JoinResponse { peers };
     send_response(response, socket).await
+}
+
+async fn peer_list(
+    peers: Vec<SocketAddr>,
+    node: Arc<Mutex<Node>>,
+    socket: &mut TcpStream,
+) -> Result<(), PeerError> {
+    let mut node = node.lock().await;
+    let is_updated = node.add_peers(&peers);
+    if is_updated {
+        tracing::debug!("Peer list updated. Broadcasting the updated list to all peers.");
+        node.broadcast_peer_list().await?;
+    }
+    send_response(PeerListResponse, socket).await
 }
 
 async fn get_chain(
@@ -66,7 +79,7 @@ async fn get_chain(
     socket: &mut TcpStream,
 ) -> Result<(), PeerError> {
     let chain = blockchain.lock().await.chain.clone();
-    tracing::debug!("Sending chain to peer");
+    tracing::debug!("Sending the chain to peer");
     let response = GetChainResponse { chain };
     send_response(response, socket).await
 }
@@ -77,7 +90,7 @@ async fn add_block(
     socket: &mut TcpStream,
 ) -> Result<(), PeerError> {
     let is_block_added = blockchain.lock().await.add_block(block);
-    tracing::debug!(is_block_added, "Adding new block");
+    tracing::debug!(is_block_added, "Adding a new block");
     let response = AddBlockResponse { is_block_added };
     send_response(response, socket).await
 }
@@ -92,7 +105,7 @@ async fn mine_block(
     let node = node.lock().await;
     let new_block = blockchain.mine_block(data);
     tracing::debug!(new_block.index, "Mining block");
-    sync::broadcast_new_block(new_block, &node).await?;
+    node.broadcast_new_block(new_block).await?;
     let response = MineBlockResponse {
         block_index: new_block.index,
     };

@@ -6,6 +6,9 @@ pub struct Args {
     /// Address of an existing node to join the cluster
     #[arg(short, long)]
     pub seed_node: Option<std::net::SocketAddr>,
+    /// Peer sync period (in seconds)
+    #[arg(long, default_value_t = 30)]
+    pub peer_sync: u64,
     #[arg(short, long)]
     /// Port to listen on for incoming connections.
     pub port: u16,

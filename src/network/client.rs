@@ -1,7 +1,5 @@
 use crate::blockchain::Block;
-use crate::network::message::{
-    AddBlockResponse, GetChainResponse, JoinResponse, MineBlockResponse, PeerRequest,
-};
+use crate::network::message::*;
 use std::net::SocketAddr;
 
 use serde::de::DeserializeOwned;
@@ -18,10 +16,19 @@ pub async fn join_cluster<A: ToSocketAddrs>(
     Ok(response.peers)
 }
 
+pub async fn send_peer_list<A: ToSocketAddrs>(
+    peer: A,
+    peers: &[SocketAddr],
+) -> Result<PeerListResponse, ClientError> {
+    let request = PeerRequest::PeerList(peers.to_vec());
+    tracing::debug!(?peers, "Sending the peers list");
+    send_message(peer, request).await
+}
+
 pub async fn get_chain<A: ToSocketAddrs>(peer: A) -> Result<Vec<Block>, ClientError> {
     let response: GetChainResponse = send_message(peer, PeerRequest::GetChain).await?;
     tracing::debug!(
-        "Received chain from peer. Chain length: {}",
+        "Received the chain from peer. Chain length: {}",
         response.chain.len()
     );
     Ok(response.chain)

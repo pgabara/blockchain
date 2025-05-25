@@ -18,5 +18,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .init();
 
     let args = Args::parse();
-    node::start(args).await
+    tracing::debug!(?args, "Blockchain node configuration");
+    node::start::start_node(args).await
 }

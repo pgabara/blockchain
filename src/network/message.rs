@@ -1,11 +1,12 @@
 use crate::blockchain::Block;
-use crate::sync;
+use crate::node::broadcast::BroadcastError;
 use std::net::SocketAddr;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 #[serde(tag = "type", content = "data")]
 pub enum PeerRequest {
     Join(SocketAddr),
+    PeerList(Vec<SocketAddr>),
     GetChain,
     AddBlock(Block),
     MineBlock(String),
@@ -15,6 +16,9 @@ pub enum PeerRequest {
 pub struct JoinResponse {
     pub peers: Vec<SocketAddr>,
 }
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct PeerListResponse;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct GetChainResponse {
@@ -37,6 +41,6 @@ pub enum PeerError {
     SocketError(#[from] std::io::Error),
     #[error("Invalid request: {0}")]
     InvalidMessage(#[from] serde_json::error::Error),
-    #[error("Sync error: {0}")]
-    SyncError(#[from] sync::SyncError),
+    #[error("Broadcast error: {0}")]
+    BroadcastError(#[from] BroadcastError),
 }

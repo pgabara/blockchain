@@ -28,11 +28,14 @@ pub async fn start_node_with_seed(seed_node: SocketAddr) -> TestServer {
 async fn start_node_raw(addr: SocketAddr, seed_node: Option<SocketAddr>) -> TestServer {
     let args = Args {
         seed_node,
+        peer_sync: 30,
         port: addr.port(),
         difficulty: 1,
     };
     let handle = tokio::spawn(async {
-        node::start(args).await.expect("Could not start server");
+        node::start::start_node(args)
+            .await
+            .expect("Could not start server");
     });
     tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
     TestServer { handle, addr }
