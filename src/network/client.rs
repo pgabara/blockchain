@@ -6,6 +6,16 @@ use serde::de::DeserializeOwned;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::{TcpStream, ToSocketAddrs};
 
+pub async fn ping_peer<A: ToSocketAddrs>(peer: A) -> bool {
+    match send_message::<A, Pong>(peer, PeerRequest::Ping).await {
+        Ok(_) => true,
+        Err(e) => {
+            tracing::error!("Failed to ping peer: {}", e);
+            false
+        }
+    }
+}
+
 pub async fn join_cluster<A: ToSocketAddrs>(
     peer: A,
     node_addr: SocketAddr,

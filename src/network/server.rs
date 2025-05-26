@@ -40,12 +40,18 @@ async fn accept_socket(
     tracing::debug!("Received new request from peer: {:?}", message);
 
     match message {
+        PeerRequest::Ping => ping(&mut socket).await,
         PeerRequest::Join(addr) => join(node, addr, &mut socket).await,
         PeerRequest::PeerList(peers) => peer_list(peers, node, &mut socket).await,
         PeerRequest::GetChain => get_chain(blockchain, &mut socket).await,
         PeerRequest::AddBlock(block) => add_block(block, blockchain, &mut socket).await,
         PeerRequest::MineBlock(data) => mine_block(data, blockchain, node, &mut socket).await,
     }
+}
+
+async fn ping(socket: &mut TcpStream) -> Result<(), PeerError> {
+    tracing::trace!("Received a ping message");
+    send_response(Pong, socket).await
 }
 
 async fn join(

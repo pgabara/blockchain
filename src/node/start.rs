@@ -3,6 +3,7 @@ use crate::blockchain::Blockchain;
 use crate::network::{client, server};
 use crate::node::Node;
 use crate::node::broadcast::NodeStateBroadcast;
+use crate::node::health::run_health_check;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -15,7 +16,7 @@ pub async fn start_node(args: Args) -> Result<(), Box<dyn std::error::Error>> {
         join_cluster(seed_peer, Arc::clone(&node), Arc::clone(&blockchain)).await?;
     }
 
-    sync_blockchain_peers(Arc::clone(&node), args.peer_sync);
+    sync_blockchain_peers(Arc::clone(&node), args.cluster_sync_period);
 
     tracing::debug!("Starting a new blockchain");
     server::start_server(args.port, Arc::clone(&blockchain), Arc::clone(&node)).await
@@ -37,10 +38,11 @@ async fn join_cluster(
     Ok(())
 }
 
-fn sync_blockchain_peers(node: Arc<Mutex<Node>>, peer_sync_period: u64) {
+fn sync_blockchain_peers(node: Arc<Mutex<Node>>, cluster_sync_period: u64) {
     tokio::spawn(async move {
-        tokio::time::sleep(tokio::time::Duration::from_secs(peer_sync_period)).await;
+        tokio::time::sleep(tokio::time::Duration::from_secs(cluster_sync_period)).await;
         tracing::debug!("Sending peer sync event");
+        let _ = run_health_check(Arc::clone(&node)).await;
         let node = node.lock().await;
         let _ = node.broadcast_peer_list().await;
     });

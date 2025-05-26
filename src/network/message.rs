@@ -10,6 +10,7 @@ pub enum PeerRequest {
     GetChain,
     AddBlock(Block),
     MineBlock(String),
+    Ping,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -34,6 +35,9 @@ pub struct AddBlockResponse {
 pub struct MineBlockResponse {
     pub block_index: usize,
 }
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct Pong;
 
 #[derive(thiserror::Error, Debug)]
 pub enum PeerError {

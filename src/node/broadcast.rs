@@ -18,23 +18,17 @@ pub enum BroadcastError {
 
 impl NodeStateBroadcast for Node {
     async fn broadcast_peer_list(&self) -> Result<(), BroadcastError> {
-        let peers: Vec<_> = self
-            .peers
-            .iter()
-            .map(|&p| p.addr)
-            .chain(std::iter::once(self.node_addr))
-            .collect();
+        let peers: Vec<_> = self.cluster_peers().iter().map(|p| p.addr).collect();
         tracing::debug!(?peers, "Broadcasting the peer list");
-        for &peer in &self.peers {
+        for &peer in self.peers.keys() {
             client::send_peer_list(peer.addr, &peers).await?;
         }
         Ok(())
     }
 
     async fn broadcast_new_block(&self, block: &Block) -> Result<(), BroadcastError> {
-        let peers = &self.peers;
-        tracing::debug!(block.index, ?peers, "Broadcasting new block");
-        for peer in peers {
+        tracing::debug!(block.index, "Broadcasting new block");
+        for &peer in self.peers.keys() {
             let status = client::add_block(block.clone(), peer.addr).await?;
             tracing::debug!(status, "Broadcasting new block to {}", peer.addr);
         }

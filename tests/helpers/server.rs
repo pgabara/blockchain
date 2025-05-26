@@ -28,7 +28,7 @@ pub async fn start_node_with_seed(seed_node: SocketAddr) -> TestServer {
 async fn start_node_raw(addr: SocketAddr, seed_node: Option<SocketAddr>) -> TestServer {
     let args = Args {
         seed_node,
-        peer_sync: 30,
+        cluster_sync_period: 30,
         port: addr.port(),
         difficulty: 1,
     };
