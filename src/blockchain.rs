@@ -11,7 +11,7 @@ pub struct Block {
 }
 
 impl Block {
-    fn new(index: usize, data: String, previous_hash: String, difficulty: usize) -> Self {
+    pub fn new(index: usize, data: String, previous_hash: String, difficulty: usize) -> Self {
         let timestamp = chrono::Utc::now().timestamp();
         let mut block = Self {
             index,

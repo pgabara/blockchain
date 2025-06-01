@@ -1,6 +1,7 @@
 pub mod broadcast;
 mod health;
 mod peer;
+pub mod server;
 pub mod start;
 
 use crate::node::health::HealthStatus;
