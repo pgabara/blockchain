@@ -1,3 +1,4 @@
+pub mod client;
 pub mod server;
 
 pub async fn repeat_until<T, R, F, P>(future: F, predicate: P, max_times: u8) -> T

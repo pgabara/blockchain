@@ -5,7 +5,7 @@ use blockchain::args::Args;
 use blockchain::node;
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() {
     let fmt_layer = tracing_subscriber::fmt::layer()
         .json()
         .with_current_span(true)
@@ -19,5 +19,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let args = Args::parse();
     tracing::debug!(?args, "Blockchain node configuration");
-    node::start::start_node(args).await
+    node::start::start_node(args)
+        .await
+        .expect("Failed to start a blockchain node");
 }

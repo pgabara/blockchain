@@ -25,7 +25,7 @@ pub async fn start_server<B>(
     blockchain: Arc<Mutex<Blockchain>>,
     node: Arc<Mutex<Node>>,
     broadcaster: Arc<B>,
-) -> Result<(), Box<dyn std::error::Error>>
+) -> Result<(), ServerError>
 where
     B: Broadcaster + Send + Sync + 'static,
 {
