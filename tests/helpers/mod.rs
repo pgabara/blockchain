@@ -1,7 +1,7 @@
 pub mod client;
 pub mod server;
 
-pub async fn repeat_until<T, R, F, P>(future: F, predicate: P, max_times: u8) -> T
+pub async fn retry<T, R, F, P>(future: F, predicate: P, max_times: u8) -> T
 where
     F: Fn() -> R + Sized,
     R: Future<Output = T>,

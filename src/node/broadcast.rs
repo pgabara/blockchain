@@ -1,20 +1,29 @@
 use crate::api::request::Request;
-use crate::api::response::{AddBlockResponse, PeerListResponse};
+use crate::api::response::{PeerListResponse, SyncBlockResponse, SyncTransactionResponse};
 use crate::blockchain::Block;
 use crate::network::client::{Client, ClientError};
-use crate::node::Node;
+use crate::node::peer::Peer;
+use crate::transaction::Transaction;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 pub trait Broadcaster {
     fn broadcast_peer_list(
         &self,
-        node: &Node,
+        peers: &[Peer],
+        cluster_peers: Vec<Peer>,
     ) -> impl Future<Output = Result<(), BroadcasterError>> + Send;
+
     fn broadcast_new_block(
         &self,
         block: &Block,
-        node: &Node,
+        peers: &[Peer],
+    ) -> impl Future<Output = Result<(), BroadcasterError>> + Send;
+
+    fn broadcast_transaction(
+        &self,
+        transaction: Transaction,
+        peers: &[Peer],
     ) -> impl Future<Output = Result<(), BroadcasterError>> + Send;
 }
 
@@ -38,12 +47,16 @@ impl<C> Broadcaster for NodeBroadcaster<C>
 where
     C: Client + Send + Sync,
 {
-    async fn broadcast_peer_list(&self, node: &Node) -> Result<(), BroadcasterError> {
-        let peers: Vec<_> = node.cluster_peers().iter().map(|p| p.addr).collect();
+    async fn broadcast_peer_list(
+        &self,
+        peers: &[Peer],
+        cluster_peers: Vec<Peer>,
+    ) -> Result<(), BroadcasterError> {
+        let cluster_peers: Vec<_> = cluster_peers.iter().map(|p| p.addr).collect();
         tracing::debug!(?peers, "Broadcasting the peer list");
-        for &peer in node.peers.keys() {
+        for &peer in peers {
             let client = Arc::clone(&self.client);
-            send_peer_list(peer.addr, &peers, client).await?;
+            send_peer_list(peer.addr, &cluster_peers, client).await?;
         }
         Ok(())
     }
@@ -51,13 +64,26 @@ where
     async fn broadcast_new_block(
         &self,
         block: &Block,
-        node: &Node,
+        peers: &[Peer],
     ) -> Result<(), BroadcasterError> {
         tracing::debug!(block.index, "Broadcasting new block");
-        for &peer in node.peers.keys() {
+        for &peer in peers {
             let client = Arc::clone(&self.client);
             let status = add_block(block.clone(), peer.addr, client).await?;
             tracing::debug!(status, "Broadcasting new block to {}", peer.addr);
+        }
+        Ok(())
+    }
+
+    async fn broadcast_transaction(
+        &self,
+        transaction: Transaction,
+        peers: &[Peer],
+    ) -> Result<(), BroadcasterError> {
+        for &peer in peers {
+            let client = Arc::clone(&self.client);
+            let status = sync_transaction(transaction.clone(), peer.addr, client).await?;
+            tracing::debug!(status, "Broadcasting new transaction to {}", peer.addr);
         }
         Ok(())
     }
@@ -78,17 +104,30 @@ async fn add_block<C: Client>(
     peer_addr: SocketAddr,
     client: Arc<C>,
 ) -> Result<bool, ClientError> {
-    let request = Request::AddBlock(block);
-    let response: AddBlockResponse = client.send(peer_addr, request).await?;
+    let request = Request::SyncBlock(block);
+    let response: SyncBlockResponse = client.send(peer_addr, request).await?;
     tracing::debug!(response.is_block_added, "Adding new block");
     Ok(response.is_block_added)
+}
+
+async fn sync_transaction<C: Client>(
+    transaction: Transaction,
+    peer_addr: SocketAddr,
+    client: Arc<C>,
+) -> Result<bool, ClientError> {
+    let request = Request::SyncTransaction(transaction);
+    let response: SyncTransactionResponse = client.send(peer_addr, request).await?;
+    tracing::debug!(
+        response.is_transaction_added,
+        "Adding new transaction (sync)"
+    );
+    Ok(response.is_transaction_added)
 }
 
 #[cfg(test)]
 mod test {
     use super::*;
     use crate::network::client::test_utils::TestClient;
-    use crate::node::health::HealthStatus;
     use crate::node::peer::Peer;
 
     #[tokio::test]
@@ -96,13 +135,12 @@ mod test {
         let client = TestClient::new(vec![]);
         let broadcaster = NodeBroadcaster::new(Arc::new(client));
 
-        let mut node = Node::new(52000);
-        node.peers.insert(
-            Peer::new("0.0.0.0:52001".parse().unwrap()),
-            HealthStatus::Healthy,
-        );
+        let peer_1 = ([0, 0, 0, 0], 52001).into();
+        let peer_2 = ([0, 0, 0, 0], 52002).into();
+        let peers = vec![Peer::new(peer_1)];
+        let cluster_peers = vec![Peer::new(peer_1), Peer::new(peer_2)];
 
-        let response = broadcaster.broadcast_peer_list(&node).await;
+        let response = broadcaster.broadcast_peer_list(&peers, cluster_peers).await;
         assert!(response.is_err());
     }
 
@@ -113,24 +151,27 @@ mod test {
         let client = Arc::new(client);
         let broadcaster = NodeBroadcaster::new(Arc::clone(&client));
 
-        let mut node = Node::new(52000);
         let peer_1 = ([0, 0, 0, 0], 52001).into();
         let peer_2 = ([0, 0, 0, 0], 52002).into();
-        node.add_peers(&[peer_1, peer_2]);
+        let peer_3 = ([0, 0, 0, 0], 52003).into();
+        let peers = vec![Peer::new(peer_2), Peer::new(peer_3)];
+        let cluster_peers = vec![Peer::new(peer_1), Peer::new(peer_2), Peer::new(peer_3)];
 
-        let response = broadcaster.broadcast_peer_list(&node).await;
+        let response = broadcaster
+            .broadcast_peer_list(&peers, cluster_peers.clone())
+            .await;
         assert!(response.is_ok());
 
-        let request = Request::PeerList(node.cluster_peers().iter().map(|p| p.addr).collect());
+        let request = Request::PeerList(cluster_peers.iter().map(|p| p.addr).collect());
         let requests = client.requests.lock().await;
 
-        assert_eq!(requests.get(&peer_1), Some(&request));
         assert_eq!(requests.get(&peer_2), Some(&request));
+        assert_eq!(requests.get(&peer_3), Some(&request));
     }
 
     #[tokio::test]
     async fn test_broadcast_new_block_to_peers() {
-        let response = serde_json::to_vec(&AddBlockResponse {
+        let response = serde_json::to_vec(&SyncBlockResponse {
             is_block_added: true,
         })
         .unwrap();
@@ -138,17 +179,20 @@ mod test {
         let client = Arc::new(client);
         let broadcaster = NodeBroadcaster::new(Arc::clone(&client));
 
-        let mut node = Node::new(52000);
         let peer_1 = ([0, 0, 0, 0], 52001).into();
         let peer_2 = ([0, 0, 0, 0], 52002).into();
-        node.add_peers(&[peer_1, peer_2]);
+        let peers = vec![Peer::new(peer_1), Peer::new(peer_2)];
 
-        let block = Block::new(1, "test block".to_string(), "".to_string(), 1);
+        let transactions = vec![
+            Transaction::new("0".to_string(), "1".to_string(), 800),
+            Transaction::new("1".to_string(), "2".to_string(), 500),
+        ];
+        let block = Block::new(1, transactions, "".to_string(), 1);
 
-        let response = broadcaster.broadcast_new_block(&block, &node).await;
+        let response = broadcaster.broadcast_new_block(&block, &peers).await;
         assert!(response.is_ok());
 
-        let request = Request::AddBlock(block);
+        let request = Request::SyncBlock(block);
         let requests = client.requests.lock().await;
 
         assert_eq!(requests.get(&peer_1), Some(&request));
@@ -160,9 +204,11 @@ mod test {
         let client = TestClient::new(vec![]);
         let client = Arc::new(client);
         let broadcaster = NodeBroadcaster::new(Arc::clone(&client));
-        let node = Node::new(52000);
 
-        let response = broadcaster.broadcast_peer_list(&node).await;
+        let peers = vec![];
+        let cluster_peers = vec![Peer::new(([0, 0, 0, 0], 52001).into())];
+
+        let response = broadcaster.broadcast_peer_list(&peers, cluster_peers).await;
         assert!(response.is_ok());
 
         let requests = client.requests.lock().await;
@@ -175,10 +221,13 @@ mod test {
         let client = Arc::new(client);
         let broadcaster = NodeBroadcaster::new(Arc::clone(&client));
 
-        let node = Node::new(52000);
-        let block = Block::new(1, "test block".to_string(), "".to_string(), 1);
+        let transactions = vec![
+            Transaction::new("0".to_string(), "1".to_string(), 800),
+            Transaction::new("1".to_string(), "2".to_string(), 500),
+        ];
+        let block = Block::new(1, transactions, "".to_string(), 1);
 
-        let response = broadcaster.broadcast_new_block(&block, &node).await;
+        let response = broadcaster.broadcast_new_block(&block, &[]).await;
         assert!(response.is_ok());
 
         let requests = client.requests.lock().await;

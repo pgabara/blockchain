@@ -15,4 +15,7 @@ pub struct Args {
     /// Difficulty level for the Proof of Work algorithm
     #[arg(short, long, default_value_t = 2)]
     pub difficulty: usize,
+    /// New block mining period (in seconds)
+    #[arg(short, long, default_value_t = 10)]
+    pub new_block_mine_period: u64,
 }

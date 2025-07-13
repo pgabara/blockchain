@@ -1,22 +1,40 @@
+use crate::transaction::Transaction;
 use sha2::{Digest, Sha256};
 
 #[derive(PartialEq, Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Block {
     pub index: usize,
     timestamp: i64,
-    data: String,
+    pub transactions: Vec<Transaction>,
     previous_hash: String,
     hash: String,
     nonce: usize,
 }
 
 impl Block {
-    pub fn new(index: usize, data: String, previous_hash: String, difficulty: usize) -> Self {
+    pub fn genesis(difficulty: usize) -> Self {
+        let mut block = Self {
+            index: 0,
+            timestamp: 0,
+            transactions: vec![],
+            previous_hash: String::new(),
+            hash: String::new(),
+            nonce: 0,
+        };
+        block.mine_block(difficulty);
+        block
+    }
+    pub fn new(
+        index: usize,
+        transactions: Vec<Transaction>,
+        previous_hash: String,
+        difficulty: usize,
+    ) -> Self {
         let timestamp = chrono::Utc::now().timestamp();
         let mut block = Self {
             index,
             timestamp,
-            data,
+            transactions,
             previous_hash,
             hash: String::new(),
             nonce: 0,
@@ -34,9 +52,10 @@ impl Block {
     }
 
     fn calculate_hash(&self) -> String {
+        let transactions = serde_json::to_string(&self.transactions).unwrap_or("".to_string());
         let input = format!(
             "{}{}{}{}{}",
-            self.index, self.timestamp, self.data, self.previous_hash, self.nonce
+            self.index, self.timestamp, transactions, self.previous_hash, self.nonce
         );
         let mut hasher = Sha256::new();
         hasher.update(input);
@@ -51,9 +70,8 @@ pub struct Blockchain {
 
 impl Blockchain {
     pub fn new(difficulty: usize) -> Self {
-        let genesis_block = Block::new(0, "Genesis Block".to_string(), String::new(), difficulty);
         Self {
-            chain: vec![genesis_block],
+            chain: vec![Block::genesis(difficulty)],
             difficulty,
         }
     }
@@ -67,9 +85,14 @@ impl Blockchain {
         false
     }
 
-    pub fn mine_block(&mut self, data: String) -> &Block {
+    pub fn mine_block(&mut self, transactions: Vec<Transaction>) -> &Block {
         let previous_hash = self.chain.last().unwrap().hash.clone();
-        let new_block = Block::new(self.chain.len(), data, previous_hash, self.difficulty);
+        let new_block = Block::new(
+            self.chain.len(),
+            transactions,
+            previous_hash,
+            self.difficulty,
+        );
         self.chain.push(new_block);
         self.chain.last().unwrap()
     }
@@ -116,18 +139,25 @@ mod tests {
     fn test_new_blockchain_has_genesis_block() {
         let blockchain = Blockchain::new(1);
         let genesis_block = blockchain.chain.first().unwrap();
-        let expected_genesis_block = Block::new(0, "Genesis Block".to_string(), String::new(), 1);
+        let expected_genesis_block = Block::genesis(1);
         assert_eq!(genesis_block, &expected_genesis_block);
     }
 
     #[test]
     fn test_add_new_block_to_blockchain() {
         let mut blockchain = Blockchain::new(1);
-        blockchain.mine_block("Test Block".to_string());
+
+        let transactions = vec![
+            Transaction::new("0".to_string(), "1".to_string(), 800),
+            Transaction::new("1".to_string(), "2".to_string(), 500),
+            Transaction::new("2".to_string(), "3".to_string(), 200),
+        ];
+        blockchain.mine_block(transactions);
+
         let genesis_block = blockchain.chain.first().unwrap();
         let new_block = blockchain.chain.last().unwrap();
         assert_eq!(new_block.index, 1);
-        assert_eq!(new_block.data, "Test Block".to_string());
+        assert_eq!(new_block.transactions.len(), 3);
         assert_eq!(new_block.previous_hash, genesis_block.hash);
     }
 
@@ -141,16 +171,23 @@ mod tests {
     #[test]
     fn test_is_valid_chain_with_different_genesis_block() {
         let blockchain = Blockchain::new(1);
-        let other_chain = vec![Block::new(0, "Test Block".to_string(), String::new(), 1)];
+        let transactions = vec![Transaction::new("0".to_string(), "1".to_string(), 800)];
+        let other_chain = vec![Block::new(0, transactions, String::new(), 1)];
         assert_eq!(blockchain.is_valid_chain(other_chain.as_slice()), false);
     }
 
     #[test]
     fn test_is_valid_chain_with_incorrect_previous_hash() {
         let blockchain = Blockchain::new(1);
+        let transactions = vec![
+            Transaction::new("0".to_string(), "1".to_string(), 800),
+            Transaction::new("1".to_string(), "2".to_string(), 500),
+            Transaction::new("2".to_string(), "3".to_string(), 200),
+            Transaction::new("3".to_string(), "4".to_string(), 100),
+        ];
         let other_chain = vec![
-            Block::new(0, "Test Block 1".to_string(), String::new(), 1),
-            Block::new(1, "Test Block 2".to_string(), String::new(), 1),
+            Block::new(0, transactions.clone(), String::new(), 1),
+            Block::new(1, transactions, String::new(), 1),
         ];
         assert_eq!(blockchain.is_valid_chain(other_chain.as_slice()), false);
     }
@@ -158,8 +195,19 @@ mod tests {
     #[test]
     fn test_is_valid_chain() {
         let mut blockchain = Blockchain::new(1);
-        blockchain.mine_block("Test Block 1".to_string());
-        blockchain.mine_block("Test Block 2".to_string());
+
+        let transactions = vec![
+            Transaction::new("0".to_string(), "1".to_string(), 800),
+            Transaction::new("1".to_string(), "2".to_string(), 500),
+        ];
+        blockchain.mine_block(transactions);
+
+        let transactions = vec![
+            Transaction::new("2".to_string(), "3".to_string(), 800),
+            Transaction::new("3".to_string(), "4".to_string(), 500),
+        ];
+        blockchain.mine_block(transactions);
+
         let other_chain = &blockchain.chain;
         assert!(blockchain.is_valid_chain(other_chain));
     }
@@ -167,9 +215,14 @@ mod tests {
     #[test]
     fn test_try_replace_chain_with_invalid_chain() {
         let mut blockchain = Blockchain::new(1);
+        let transactions = vec![
+            Transaction::new("0".to_string(), "1".to_string(), 800),
+            Transaction::new("2".to_string(), "3".to_string(), 200),
+            Transaction::new("1".to_string(), "2".to_string(), 500),
+        ];
         let other_chain = vec![
-            Block::new(0, "Test Block 1".to_string(), String::new(), 1),
-            Block::new(1, "Test Block 2".to_string(), String::new(), 1),
+            Block::new(0, transactions.clone(), String::new(), 1),
+            Block::new(1, transactions, String::new(), 1),
         ];
 
         let is_chain_replaced = blockchain.try_replace_chain(other_chain);
@@ -180,8 +233,18 @@ mod tests {
     #[test]
     fn test_try_replace_chain_with_shorter_chain() {
         let mut blockchain = Blockchain::new(1);
-        blockchain.mine_block("Test Block 1".to_string());
-        blockchain.mine_block("Test Block 2".to_string());
+
+        blockchain.mine_block(vec![Transaction::new(
+            "0".to_string(),
+            "1".to_string(),
+            800,
+        )]);
+        blockchain.mine_block(vec![Transaction::new(
+            "3".to_string(),
+            "4".to_string(),
+            100,
+        )]);
+
         let other_chain = vec![blockchain.chain[0].clone()];
 
         let is_chain_replaced = blockchain.try_replace_chain(other_chain);
@@ -192,8 +255,18 @@ mod tests {
     #[test]
     fn test_try_replace_chain() {
         let mut blockchain = Blockchain::new(1);
-        blockchain.mine_block("Test Block 1".to_string());
-        blockchain.mine_block("Test Block 2".to_string());
+
+        blockchain.mine_block(vec![Transaction::new(
+            "0".to_string(),
+            "1".to_string(),
+            800,
+        )]);
+        blockchain.mine_block(vec![Transaction::new(
+            "1".to_string(),
+            "2".to_string(),
+            400,
+        )]);
+
         let other_chain = blockchain.chain.clone();
         blockchain.chain.remove(2);
 

@@ -3,6 +3,7 @@ use crate::api::response::*;
 use crate::blockchain::{Block, Blockchain};
 use crate::node::Node;
 use crate::node::broadcast::{Broadcaster, BroadcasterError};
+use crate::transaction::Transaction;
 use serde::Serialize;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -23,6 +24,7 @@ pub enum ServerError {
 pub async fn start_server<B>(
     port: u16,
     blockchain: Arc<Mutex<Blockchain>>,
+    transactions_queue: Arc<Mutex<Vec<Transaction>>>,
     node: Arc<Mutex<Node>>,
     broadcaster: Arc<B>,
 ) -> Result<(), ServerError>
@@ -37,7 +39,15 @@ where
         let blockchain = Arc::clone(&blockchain);
         let node = Arc::clone(&node);
         let broadcaster = Arc::clone(&broadcaster);
-        tokio::spawn(accept_socket(socket, addr, blockchain, node, broadcaster));
+        let transactions_queue = Arc::clone(&transactions_queue);
+        tokio::spawn(accept_socket(
+            socket,
+            addr,
+            blockchain,
+            transactions_queue,
+            node,
+            broadcaster,
+        ));
     }
 }
 
@@ -45,6 +55,7 @@ async fn accept_socket(
     mut socket: TcpStream,
     addr: SocketAddr,
     blockchain: Arc<Mutex<Blockchain>>,
+    transactions_queue: Arc<Mutex<Vec<Transaction>>>,
     node: Arc<Mutex<Node>>,
     broadcaster: Arc<impl Broadcaster>,
 ) -> Result<(), ServerError> {
@@ -61,9 +72,21 @@ async fn accept_socket(
         Request::Join(addr) => join(node, addr, &mut socket).await,
         Request::PeerList(peers) => peer_list(peers, node, broadcaster, &mut socket).await,
         Request::GetChain => get_chain(blockchain, &mut socket).await,
-        Request::AddBlock(block) => add_block(block, blockchain, &mut socket).await,
-        Request::MineBlock(data) => {
-            mine_block(data, blockchain, node, broadcaster, &mut socket).await
+        Request::SyncBlock(block) => {
+            sync_block(block, blockchain, transactions_queue, &mut socket).await
+        }
+        Request::AddTransaction(transaction) => {
+            add_transaction(
+                transaction,
+                transactions_queue,
+                node,
+                broadcaster,
+                &mut socket,
+            )
+            .await
+        }
+        Request::SyncTransaction(transaction) => {
+            sync_transaction(transaction, transactions_queue, &mut socket).await
         }
     }
 }
@@ -78,7 +101,7 @@ async fn join(
     addr: SocketAddr,
     socket: &mut TcpStream,
 ) -> Result<(), ServerError> {
-    let mut node = node.lock().await;
+    let mut node = node.try_lock().unwrap();
     node.add_peers(&[addr]);
     let peers: Vec<SocketAddr> = node.cluster_peers().iter().map(|p| p.addr).collect();
     let response = JoinResponse { peers };
@@ -91,11 +114,18 @@ async fn peer_list(
     broadcaster: Arc<impl Broadcaster>,
     socket: &mut TcpStream,
 ) -> Result<(), ServerError> {
-    let mut node = node.lock().await;
-    let is_updated = node.add_peers(&peers);
+    let (peers, cluster_peers, is_updated) = {
+        let mut node = node.try_lock().unwrap();
+        let is_updated = node.add_peers(&peers);
+        let cluster_peers = node.cluster_peers();
+        let peers: Vec<_> = node.peers.keys().copied().collect();
+        (peers, cluster_peers, is_updated)
+    };
     if is_updated {
         tracing::debug!("Peer list updated. Broadcasting the updated list to all peers.");
-        broadcaster.broadcast_peer_list(&node).await?;
+        broadcaster
+            .broadcast_peer_list(&peers, cluster_peers)
+            .await?;
     }
     send_response(PeerListResponse, socket).await
 }
@@ -104,37 +134,64 @@ async fn get_chain(
     blockchain: Arc<Mutex<Blockchain>>,
     socket: &mut TcpStream,
 ) -> Result<(), ServerError> {
-    let chain = blockchain.lock().await.chain.clone();
+    let chain = blockchain.try_lock().unwrap().chain.clone();
     tracing::debug!("Sending the chain to peer");
     let response = GetChainResponse { chain };
     send_response(response, socket).await
 }
 
-async fn add_block(
+async fn sync_block(
     block: Block,
     blockchain: Arc<Mutex<Blockchain>>,
+    transactions_queue: Arc<Mutex<Vec<Transaction>>>,
     socket: &mut TcpStream,
 ) -> Result<(), ServerError> {
-    let is_block_added = blockchain.lock().await.add_block(block);
-    tracing::debug!(is_block_added, "Adding a new block");
-    let response = AddBlockResponse { is_block_added };
+    {
+        let mut transactions = transactions_queue.try_lock().unwrap();
+        for tx in block.transactions.iter() {
+            transactions.retain(|mem_tx| mem_tx != tx);
+        }
+    }
+    let is_block_added = blockchain.try_lock().unwrap().add_block(block);
+    tracing::debug!(is_block_added, "Adding a new block (sync)");
+    let response = SyncBlockResponse { is_block_added };
     send_response(response, socket).await
 }
 
-async fn mine_block(
-    data: String,
-    blockchain: Arc<Mutex<Blockchain>>,
+async fn add_transaction(
+    transaction: Transaction,
+    transactions_queue: Arc<Mutex<Vec<Transaction>>>,
     node: Arc<Mutex<Node>>,
     broadcaster: Arc<impl Broadcaster>,
     socket: &mut TcpStream,
 ) -> Result<(), ServerError> {
-    let mut blockchain = blockchain.lock().await;
-    let node = node.lock().await;
-    let new_block = blockchain.mine_block(data);
-    tracing::debug!(new_block.index, "Mining block");
-    broadcaster.broadcast_new_block(new_block, &node).await?;
-    let response = MineBlockResponse {
-        block_index: new_block.index,
+    transactions_queue
+        .try_lock()
+        .unwrap()
+        .push(transaction.clone());
+    tracing::debug!("Adding a new transaction");
+    let peers: Vec<_> = node.try_lock().unwrap().peers.keys().copied().collect();
+    broadcaster
+        .broadcast_transaction(transaction, &peers)
+        .await?;
+    let response = AddTransactionResponse {
+        is_transaction_added: true,
+    };
+    send_response(response, socket).await
+}
+
+async fn sync_transaction(
+    transaction: Transaction,
+    transactions_queue: Arc<Mutex<Vec<Transaction>>>,
+    socket: &mut TcpStream,
+) -> Result<(), ServerError> {
+    tracing::debug!("Adding a new transaction (sync)");
+    transactions_queue
+        .try_lock()
+        .unwrap()
+        .push(transaction.clone());
+    let response = SyncTransactionResponse {
+        is_transaction_added: true,
     };
     send_response(response, socket).await
 }

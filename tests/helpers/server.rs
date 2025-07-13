@@ -28,9 +28,10 @@ pub async fn start_node_with_seed(seed_node: SocketAddr) -> TestServer {
 async fn start_node_raw(addr: SocketAddr, seed_node: Option<SocketAddr>) -> TestServer {
     let args = Args {
         seed_node,
-        cluster_sync_period: 30,
         port: addr.port(),
         difficulty: 1,
+        cluster_sync_period: 30,
+        new_block_mine_period: 0,
     };
     let handle = tokio::spawn(async {
         node::start::start_node(args)

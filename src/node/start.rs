@@ -8,6 +8,7 @@ use crate::node::health::{HealthChecker, NodeHealthChecker, run_health_check};
 use crate::node::peer::Peer;
 use crate::node::server::ServerError;
 use crate::node::{Node, server};
+use crate::transaction::Transaction;
 use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
@@ -20,81 +21,44 @@ pub enum ClusterInitError {
     ClientError(#[from] ClientError),
 }
 
-pub trait ClusterInit {
-    fn join(
-        &self,
-        seed_addr: SocketAddr,
-        node_addr: SocketAddr,
-    ) -> impl Future<Output = Result<Vec<Peer>, ClusterInitError>> + Send;
-    fn get_chain(
-        &self,
-        seed_addr: SocketAddr,
-    ) -> impl Future<Output = Result<Vec<Block>, ClusterInitError>> + Send;
-}
-
-pub struct ClusterInitializer<C: Client> {
-    client: Arc<C>,
-}
-
-impl<C: Client> ClusterInitializer<C> {
-    pub fn new(client: Arc<C>) -> Self {
-        Self { client }
-    }
-}
-
-impl<C> ClusterInit for ClusterInitializer<C>
-where
-    C: Client + Send + Sync,
-{
-    async fn join(
-        &self,
-        seed_addr: SocketAddr,
-        node_addr: SocketAddr,
-    ) -> Result<Vec<Peer>, ClusterInitError> {
-        let request = Request::Join(node_addr);
-        let response: JoinResponse = self.client.send(seed_addr, request).await?;
-        tracing::debug!(?response.peers, ?node_addr, "Received join response");
-        let peers = response.peers.into_iter().map(Peer::new).collect();
-        Ok(peers)
-    }
-
-    async fn get_chain(&self, seed_addr: SocketAddr) -> Result<Vec<Block>, ClusterInitError> {
-        let response: GetChainResponse = self.client.send(seed_addr, Request::GetChain).await?;
-        let chain_len = response.chain.len();
-        tracing::debug!(chain_len, "Received the chain from peer");
-        Ok(response.chain)
-    }
-}
-
 pub async fn start_node(args: Args) -> Result<(), ClusterInitError> {
     let blockchain = Arc::new(Mutex::new(Blockchain::new(args.difficulty)));
+    let transactions_queue = Arc::new(Mutex::new(Vec::new()));
     let node = Arc::new(Mutex::new(Node::new(args.port)));
-    let client = Arc::new(TcpClient);
+    let client = Arc::new(TcpClient::default());
     let broadcaster = Arc::new(NodeBroadcaster::new(Arc::clone(&client)));
-    let cluster_init = Arc::new(ClusterInitializer::new(Arc::clone(&client)));
-    let health_checker = Arc::new(NodeHealthChecker::new(client));
+    let health_checker = Arc::new(NodeHealthChecker::new(Arc::clone(&client)));
 
     if let Some(seed_peer) = args.seed_node {
         join_cluster(
             seed_peer,
             Arc::clone(&node),
             Arc::clone(&blockchain),
-            cluster_init,
+            Arc::clone(&client),
         )
         .await?;
     }
 
-    sync_blockchain_peers(
+    sync_blockchain_peers_background_task(
         health_checker,
         Arc::clone(&broadcaster),
         Arc::clone(&node),
         args.cluster_sync_period,
     );
 
+    mine_block_background_task(
+        Arc::clone(&broadcaster),
+        Arc::clone(&node),
+        Arc::clone(&blockchain),
+        Arc::clone(&transactions_queue),
+        args.new_block_mine_period,
+    );
+
     tracing::debug!("Starting a blockchain server");
     server::start_server(
         args.port,
         Arc::clone(&blockchain),
+        Arc::clone(&transactions_queue),
         Arc::clone(&node),
         broadcaster,
     )
@@ -103,28 +67,31 @@ pub async fn start_node(args: Args) -> Result<(), ClusterInitError> {
     Ok(())
 }
 
-async fn join_cluster<A>(
+async fn join_cluster<C>(
     seed_peer: SocketAddr,
     node: Arc<Mutex<Node>>,
     blockchain: Arc<Mutex<Blockchain>>,
-    cluster_init: Arc<A>,
+    client: Arc<C>,
 ) -> Result<(), ClusterInitError>
 where
-    A: ClusterInit + Send + Sync,
+    C: Client + Send + Sync,
 {
     tracing::debug!(?seed_peer, "Joining a blockchain cluster");
-    let mut node = node.lock().await;
-    let peers = cluster_init.join(seed_peer, node.node_addr).await?;
-    let peers: Vec<_> = peers.iter().map(|p| p.addr).collect();
-    node.add_peers(&peers);
+    let peers = {
+        let mut node = node.try_lock().unwrap();
+        let peers = join(seed_peer, node.node_addr, client.as_ref()).await?;
+        let peers: Vec<_> = peers.iter().map(|p| p.addr).collect();
+        node.add_peers(&peers);
+        peers
+    };
     tracing::debug!(?seed_peer, ?peers, "List of cluster peers updated");
-    let chain = cluster_init.get_chain(seed_peer).await?;
-    let is_chain_replaced = blockchain.lock().await.try_replace_chain(chain);
+    let chain = get_chain(seed_peer, client.as_ref()).await?;
+    let is_chain_replaced = blockchain.try_lock().unwrap().try_replace_chain(chain);
     tracing::debug!(is_chain_replaced, "Replacing the existing chain");
     Ok(())
 }
 
-fn sync_blockchain_peers<A, B>(
+fn sync_blockchain_peers_background_task<A, B>(
     health_checker: Arc<A>,
     broadcaster: Arc<B>,
     node: Arc<Mutex<Node>>,
@@ -134,28 +101,89 @@ fn sync_blockchain_peers<A, B>(
     B: Broadcaster + Send + Sync + 'static,
 {
     tokio::spawn(async move {
-        tokio::time::sleep(tokio::time::Duration::from_secs(cluster_sync_period)).await;
-        tracing::debug!("Sending peer sync event");
-        let _ = run_health_check(health_checker, Arc::clone(&node)).await;
-        let node = node.lock().await;
-        let _ = broadcaster.broadcast_peer_list(&node).await;
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(cluster_sync_period)).await;
+            tracing::debug!("Sending peer sync event");
+            let _ = run_health_check(Arc::clone(&health_checker), Arc::clone(&node)).await;
+            let (peers, cluster_peers) = {
+                let node = node.try_lock().unwrap();
+                let peers: Vec<_> = node.peers.keys().copied().collect();
+                let cluster_peers = node.cluster_peers();
+                (peers, cluster_peers)
+            };
+            let _ = broadcaster.broadcast_peer_list(&peers, cluster_peers).await;
+        }
     });
+}
+
+fn mine_block_background_task<B>(
+    broadcaster: Arc<B>,
+    node: Arc<Mutex<Node>>,
+    blockchain: Arc<Mutex<Blockchain>>,
+    transactions_queue: Arc<Mutex<Vec<Transaction>>>,
+    new_block_mine_period: u64,
+) where
+    B: Broadcaster + Send + Sync + 'static,
+{
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(tokio::time::Duration::from_secs(new_block_mine_period)).await;
+            let transactions = {
+                let mut transactions_queue = transactions_queue.try_lock().unwrap();
+                let transactions = transactions_queue.clone();
+                transactions_queue.clear();
+                transactions
+            };
+            if !transactions.is_empty() {
+                tracing::debug!("Mining a new block");
+                let block = blockchain
+                    .try_lock()
+                    .unwrap()
+                    .mine_block(transactions)
+                    .clone();
+                let peers: Vec<_> = node.try_lock().unwrap().peers.keys().copied().collect();
+                let _ = broadcaster.broadcast_new_block(&block, &peers).await;
+            }
+        }
+    });
+}
+
+async fn join(
+    seed_addr: SocketAddr,
+    node_addr: SocketAddr,
+    client: &impl Client,
+) -> Result<Vec<Peer>, ClusterInitError> {
+    let request = Request::Join(node_addr);
+    let response: JoinResponse = client.send(seed_addr, request).await?;
+    tracing::debug!(?response.peers, ?node_addr, "Received join response");
+    let peers = response.peers.into_iter().map(Peer::new).collect();
+    Ok(peers)
+}
+
+async fn get_chain(
+    seed_addr: SocketAddr,
+    client: &impl Client,
+) -> Result<Vec<Block>, ClusterInitError> {
+    let response: GetChainResponse = client.send(seed_addr, Request::GetChain).await?;
+    let chain_len = response.chain.len();
+    tracing::debug!(chain_len, "Received the chain from peer");
+    Ok(response.chain)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::network::client::test_utils::TestClient;
+    use crate::transaction::Transaction;
 
     #[tokio::test]
     async fn join_cluster_sends_node_address_to_seed_node() {
         let response = serde_json::to_vec(&JoinResponse { peers: vec![] }).unwrap();
-        let client = Arc::new(TestClient::new(response));
-        let cluster_init = ClusterInitializer::new(Arc::clone(&client));
+        let client = TestClient::new(response);
 
         let seed_addr = ([127, 0, 0, 1], 50001).into();
         let node_addr = ([127, 0, 0, 1], 50002).into();
-        let _ = cluster_init.join(seed_addr, node_addr).await;
+        let _ = join(seed_addr, node_addr, &client).await;
 
         let request = client.requests.lock().await;
         assert_eq!(request.get(&seed_addr), Some(&Request::Join(node_addr)));
@@ -172,12 +200,11 @@ mod tests {
             peers: peers.clone(),
         })
         .unwrap();
-        let client = Arc::new(TestClient::new(response));
-        let cluster_init = ClusterInitializer::new(Arc::clone(&client));
+        let client = TestClient::new(response);
 
         let seed_addr = ([127, 0, 0, 1], 50001).into();
         let node_addr = ([127, 0, 0, 1], 50004).into();
-        let response = cluster_init.join(seed_addr, node_addr).await.unwrap();
+        let response = join(seed_addr, node_addr, &client).await.unwrap();
 
         let expected_peers: Vec<_> = peers.into_iter().map(Peer::new).collect();
         assert_eq!(response, expected_peers);
@@ -185,31 +212,33 @@ mod tests {
 
     #[tokio::test]
     async fn join_cluster_returns_error_on_invalid_seed_node_response() {
-        let client = Arc::new(TestClient::new(vec![]));
-        let cluster_init = ClusterInitializer::new(Arc::clone(&client));
+        let client = TestClient::new(vec![]);
 
         let seed_addr = ([127, 0, 0, 1], 50001).into();
         let node_addr = ([127, 0, 0, 1], 50002).into();
-        let response = cluster_init.join(seed_addr, node_addr).await;
+        let response = join(seed_addr, node_addr, &client).await;
         assert!(response.is_err());
     }
 
     #[tokio::test]
     async fn get_chain_returns_chain_stored_by_cluster_peer() {
+        let transactions = vec![
+            Transaction::new("0".to_string(), "1".to_string(), 800),
+            Transaction::new("3".to_string(), "4".to_string(), 100),
+        ];
         let blocks = vec![
-            Block::new(1, "test block 1".to_string(), "1".to_string(), 1),
-            Block::new(2, "test block 2".to_string(), "2".to_string(), 1),
-            Block::new(3, "test block 3".to_string(), "3".to_string(), 1),
+            Block::new(1, transactions.clone(), "1".to_string(), 1),
+            Block::new(2, transactions.clone(), "2".to_string(), 1),
+            Block::new(3, transactions, "3".to_string(), 1),
         ];
         let response = serde_json::to_vec(&GetChainResponse {
             chain: blocks.clone(),
         })
         .unwrap();
-        let client = Arc::new(TestClient::new(response));
-        let cluster_init = ClusterInitializer::new(Arc::clone(&client));
+        let client = TestClient::new(response);
 
         let seed_addr = ([127, 0, 0, 1], 50001).into();
-        let response = cluster_init.get_chain(seed_addr).await.unwrap();
+        let response = get_chain(seed_addr, &client).await.unwrap();
         assert_eq!(response, blocks);
     }
 }

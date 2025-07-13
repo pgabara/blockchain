@@ -14,14 +14,19 @@ pub struct GetChainResponse {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub struct AddBlockResponse {
+pub struct SyncBlockResponse {
     pub is_block_added: bool,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub struct MineBlockResponse {
-    pub block_index: usize,
+pub struct Pong;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct AddTransactionResponse {
+    pub is_transaction_added: bool,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub struct Pong;
+pub struct SyncTransactionResponse {
+    pub is_transaction_added: bool,
+}
