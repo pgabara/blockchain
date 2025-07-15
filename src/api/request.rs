@@ -5,7 +5,7 @@ use crate::transaction::Transaction;
 #[serde(tag = "type", content = "data")]
 pub enum Request {
     Join(std::net::SocketAddr),
-    PeerList(Vec<std::net::SocketAddr>),
+    SyncPeerList(Vec<std::net::SocketAddr>),
     GetChain,
     SyncBlock(Block),
     Ping,

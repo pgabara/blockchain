@@ -1,13 +1,14 @@
+use crate::api::handler::NodeApiHandler;
 use crate::api::request::Request;
 use crate::api::response::{GetChainResponse, JoinResponse};
 use crate::args::Args;
 use crate::blockchain::{Block, Blockchain};
 use crate::network::client::{Client, ClientError, TcpClient};
+use crate::network::server::{ServerError, start_server};
+use crate::node::Node;
 use crate::node::broadcast::{Broadcaster, NodeBroadcaster};
 use crate::node::health::{HealthChecker, NodeHealthChecker, run_health_check};
 use crate::node::peer::Peer;
-use crate::node::server::ServerError;
-use crate::node::{Node, server};
 use crate::transaction::Transaction;
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -23,7 +24,7 @@ pub enum ClusterInitError {
 
 pub async fn start_node(args: Args) -> Result<(), ClusterInitError> {
     let blockchain = Arc::new(Mutex::new(Blockchain::new(args.difficulty)));
-    let transactions_queue = Arc::new(Mutex::new(Vec::new()));
+    let mempool = Arc::new(Mutex::new(Vec::new()));
     let node = Arc::new(Mutex::new(Node::new(args.port)));
     let client = Arc::new(TcpClient::default());
     let broadcaster = Arc::new(NodeBroadcaster::new(Arc::clone(&client)));
@@ -50,19 +51,18 @@ pub async fn start_node(args: Args) -> Result<(), ClusterInitError> {
         Arc::clone(&broadcaster),
         Arc::clone(&node),
         Arc::clone(&blockchain),
-        Arc::clone(&transactions_queue),
+        Arc::clone(&mempool),
         args.new_block_mine_period,
     );
 
-    tracing::debug!("Starting a blockchain server");
-    server::start_server(
-        args.port,
-        Arc::clone(&blockchain),
-        Arc::clone(&transactions_queue),
+    tracing::debug!("Starting a blockchain  TCP server");
+    let node_api_handler = NodeApiHandler::new(
         Arc::clone(&node),
-        broadcaster,
-    )
-    .await?;
+        Arc::clone(&blockchain),
+        Arc::clone(&mempool),
+        Arc::clone(&broadcaster),
+    );
+    start_server(args.port, node_api_handler).await?;
 
     Ok(())
 }

@@ -1,21 +1,14 @@
 use crate::blockchain::Block;
+use std::net::SocketAddr;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct JoinResponse {
-    pub peers: Vec<std::net::SocketAddr>,
+    pub peers: Vec<SocketAddr>,
 }
-
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub struct PeerListResponse;
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct GetChainResponse {
     pub chain: Vec<Block>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub struct SyncBlockResponse {
-    pub is_block_added: bool,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -27,6 +20,12 @@ pub struct AddTransactionResponse {
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub struct SyncTransactionResponse {
-    pub is_transaction_added: bool,
+pub struct SyncTransactionResponse;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct SyncPeerListResponse;
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct SyncBlockResponse {
+    pub is_block_added: bool,
 }

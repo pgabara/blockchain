@@ -1,5 +1,5 @@
 use crate::api::request::Request;
-use crate::api::response::{PeerListResponse, SyncBlockResponse, SyncTransactionResponse};
+use crate::api::response::{SyncBlockResponse, SyncPeerListResponse, SyncTransactionResponse};
 use crate::blockchain::Block;
 use crate::network::client::{Client, ClientError};
 use crate::node::peer::Peer;
@@ -82,8 +82,7 @@ where
     ) -> Result<(), BroadcasterError> {
         for &peer in peers {
             let client = Arc::clone(&self.client);
-            let status = sync_transaction(transaction.clone(), peer.addr, client).await?;
-            tracing::debug!(status, "Broadcasting new transaction to {}", peer.addr);
+            sync_transaction(transaction.clone(), peer.addr, client).await?;
         }
         Ok(())
     }
@@ -93,8 +92,8 @@ async fn send_peer_list<C: Client>(
     peer_addr: SocketAddr,
     peers: &[SocketAddr],
     client: Arc<C>,
-) -> Result<PeerListResponse, ClientError> {
-    let request = Request::PeerList(peers.to_vec());
+) -> Result<SyncPeerListResponse, ClientError> {
+    let request = Request::SyncPeerList(peers.to_vec());
     tracing::debug!(?peers, "Sending the peers list");
     client.send(peer_addr, request).await
 }
@@ -114,14 +113,10 @@ async fn sync_transaction<C: Client>(
     transaction: Transaction,
     peer_addr: SocketAddr,
     client: Arc<C>,
-) -> Result<bool, ClientError> {
+) -> Result<(), ClientError> {
     let request = Request::SyncTransaction(transaction);
-    let response: SyncTransactionResponse = client.send(peer_addr, request).await?;
-    tracing::debug!(
-        response.is_transaction_added,
-        "Adding new transaction (sync)"
-    );
-    Ok(response.is_transaction_added)
+    let _: SyncTransactionResponse = client.send(peer_addr, request).await?;
+    Ok(())
 }
 
 #[cfg(test)]
@@ -146,7 +141,7 @@ mod test {
 
     #[tokio::test]
     async fn test_broadcast_peer_list_to_peers() {
-        let response = serde_json::to_vec(&PeerListResponse).unwrap();
+        let response = serde_json::to_vec(&SyncPeerListResponse).unwrap();
         let client = TestClient::new(response);
         let client = Arc::new(client);
         let broadcaster = NodeBroadcaster::new(Arc::clone(&client));
@@ -162,7 +157,7 @@ mod test {
             .await;
         assert!(response.is_ok());
 
-        let request = Request::PeerList(cluster_peers.iter().map(|p| p.addr).collect());
+        let request = Request::SyncPeerList(cluster_peers.iter().map(|p| p.addr).collect());
         let requests = client.requests.lock().await;
 
         assert_eq!(requests.get(&peer_2), Some(&request));
