@@ -111,7 +111,7 @@ fn sync_blockchain_peers_background_task<A, B>(
                 let cluster_peers = node.cluster_peers();
                 (peers, cluster_peers)
             };
-            let _ = broadcaster.broadcast_peer_list(&peers, cluster_peers).await;
+            let _ = broadcaster.broadcast_peer_list(cluster_peers, &peers).await;
         }
     });
 }
@@ -174,7 +174,7 @@ async fn get_chain(
 mod tests {
     use super::*;
     use crate::network::client::test_utils::TestClient;
-    use crate::transaction::Transaction;
+    use crate::transaction::test_utils::create_transaction;
 
     #[tokio::test]
     async fn join_cluster_sends_node_address_to_seed_node() {
@@ -222,10 +222,7 @@ mod tests {
 
     #[tokio::test]
     async fn get_chain_returns_chain_stored_by_cluster_peer() {
-        let transactions = vec![
-            Transaction::new("0".to_string(), "1".to_string(), 800),
-            Transaction::new("3".to_string(), "4".to_string(), 100),
-        ];
+        let transactions = vec![create_transaction("1", 800), create_transaction("4", 100)];
         let blocks = vec![
             Block::new(1, transactions.clone(), "1".to_string(), 1),
             Block::new(2, transactions.clone(), "2".to_string(), 1),

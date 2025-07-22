@@ -1,17 +1,16 @@
 pub mod helpers;
 
-use crate::helpers::{client, retry, server};
-use blockchain::transaction::Transaction;
+use crate::helpers::{client, retry, server, transaction};
 
 #[tokio::test]
 async fn join_cluster_and_update_chain() {
     let node_1 = server::start_node().await;
 
-    let transaction1 = Transaction::new("s1".to_string(), "r1".to_string(), 200);
+    let transaction1 = transaction::create_transaction("r1", 200);
     let is_transaction_added = client::add_transaction(transaction1.clone(), node_1.addr).await;
     assert!(is_transaction_added);
 
-    let transaction2 = Transaction::new("s2".to_string(), "r2".to_string(), 400);
+    let transaction2 = transaction::create_transaction("r2", 400);
     let is_transaction_added = client::add_transaction(transaction2.clone(), node_1.addr).await;
     assert!(is_transaction_added);
 
@@ -48,11 +47,11 @@ async fn broadcast_transactions() {
     let node_1 = server::start_node().await;
     let node_2 = server::start_node_with_seed(node_1.addr).await;
 
-    let transaction1 = Transaction::new("s1".to_string(), "r1".to_string(), 200);
+    let transaction1 = transaction::create_transaction("r1", 200);
     let is_transaction_added = client::add_transaction(transaction1.clone(), node_2.addr).await;
     assert!(is_transaction_added);
 
-    let transaction2 = Transaction::new("s2".to_string(), "r2".to_string(), 400);
+    let transaction2 = transaction::create_transaction("r2", 400);
     let is_transaction_added = client::add_transaction(transaction2.clone(), node_2.addr).await;
     assert!(is_transaction_added);
 

@@ -11,6 +11,8 @@ pub enum ServerError {
     SocketError(#[from] std::io::Error),
     #[error("Invalid request: {0}")]
     InvalidMessage(#[from] serde_json::error::Error),
+    #[error("{0}")]
+    InternalError(String),
 }
 
 pub struct ServerResponse {

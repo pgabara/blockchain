@@ -46,16 +46,16 @@ where
         match request {
             Request::Join(peer_addr) => {
                 let node = Arc::clone(&self.node);
-                let response = join::handle_request(peer_addr, node).await?;
+                let response = join::handle_request(peer_addr, node).await;
                 ServerResponse::new(response)
             }
             Request::GetChain => {
                 let blockchain = Arc::clone(&self.blockchain);
-                let response = get_chain::handle_request(blockchain).await?;
+                let response = get_chain::handle_request(blockchain).await;
                 ServerResponse::new(response)
             }
             Request::Ping => {
-                let response = ping::handle_request().await?;
+                let response = ping::handle_request().await;
                 ServerResponse::new(response)
             }
             Request::AddTransaction(transaction) => {
@@ -70,18 +70,18 @@ where
             Request::SyncPeerList(peers) => {
                 let node = Arc::clone(&self.node);
                 let broadcaster = Arc::clone(&self.broadcaster);
-                let response = sync_peer_list::handle_request(peers, node, broadcaster).await?;
+                let response = sync_peer_list::handle_request(peers, node, broadcaster).await;
                 ServerResponse::new(response)
             }
             Request::SyncBlock(block) => {
                 let blockchain = Arc::clone(&self.blockchain);
                 let mempool = Arc::clone(&self.mempool);
-                let response = sync_block::handle_request(block, blockchain, mempool).await?;
+                let response = sync_block::handle_request(block, blockchain, mempool).await;
                 ServerResponse::new(response)
             }
             Request::SyncTransaction(transaction) => {
                 let mempool = Arc::clone(&self.mempool);
-                let response = sync_transaction::handle_request(transaction, mempool).await?;
+                let response = sync_transaction::handle_request(transaction, mempool).await;
                 ServerResponse::new(response)
             }
         }

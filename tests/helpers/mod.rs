@@ -1,5 +1,6 @@
 pub mod client;
 pub mod server;
+pub mod transaction;
 
 pub async fn retry<T, R, F, P>(future: F, predicate: P, max_times: u8) -> T
 where

@@ -134,6 +134,7 @@ impl Blockchain {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::transaction::test_utils::create_transaction;
 
     #[test]
     fn test_new_blockchain_has_genesis_block() {
@@ -148,9 +149,9 @@ mod tests {
         let mut blockchain = Blockchain::new(1);
 
         let transactions = vec![
-            Transaction::new("0".to_string(), "1".to_string(), 800),
-            Transaction::new("1".to_string(), "2".to_string(), 500),
-            Transaction::new("2".to_string(), "3".to_string(), 200),
+            create_transaction("1", 800),
+            create_transaction("2", 500),
+            create_transaction("3", 200),
         ];
         blockchain.mine_block(transactions);
 
@@ -171,7 +172,7 @@ mod tests {
     #[test]
     fn test_is_valid_chain_with_different_genesis_block() {
         let blockchain = Blockchain::new(1);
-        let transactions = vec![Transaction::new("0".to_string(), "1".to_string(), 800)];
+        let transactions = vec![create_transaction("1", 800)];
         let other_chain = vec![Block::new(0, transactions, String::new(), 1)];
         assert_eq!(blockchain.is_valid_chain(other_chain.as_slice()), false);
     }
@@ -180,10 +181,10 @@ mod tests {
     fn test_is_valid_chain_with_incorrect_previous_hash() {
         let blockchain = Blockchain::new(1);
         let transactions = vec![
-            Transaction::new("0".to_string(), "1".to_string(), 800),
-            Transaction::new("1".to_string(), "2".to_string(), 500),
-            Transaction::new("2".to_string(), "3".to_string(), 200),
-            Transaction::new("3".to_string(), "4".to_string(), 100),
+            create_transaction("1", 800),
+            create_transaction("2", 500),
+            create_transaction("3", 200),
+            create_transaction("4", 100),
         ];
         let other_chain = vec![
             Block::new(0, transactions.clone(), String::new(), 1),
@@ -196,16 +197,10 @@ mod tests {
     fn test_is_valid_chain() {
         let mut blockchain = Blockchain::new(1);
 
-        let transactions = vec![
-            Transaction::new("0".to_string(), "1".to_string(), 800),
-            Transaction::new("1".to_string(), "2".to_string(), 500),
-        ];
+        let transactions = vec![create_transaction("1", 800), create_transaction("2", 500)];
         blockchain.mine_block(transactions);
 
-        let transactions = vec![
-            Transaction::new("2".to_string(), "3".to_string(), 800),
-            Transaction::new("3".to_string(), "4".to_string(), 500),
-        ];
+        let transactions = vec![create_transaction("3", 800), create_transaction("4", 500)];
         blockchain.mine_block(transactions);
 
         let other_chain = &blockchain.chain;
@@ -216,9 +211,9 @@ mod tests {
     fn test_try_replace_chain_with_invalid_chain() {
         let mut blockchain = Blockchain::new(1);
         let transactions = vec![
-            Transaction::new("0".to_string(), "1".to_string(), 800),
-            Transaction::new("2".to_string(), "3".to_string(), 200),
-            Transaction::new("1".to_string(), "2".to_string(), 500),
+            create_transaction("1", 800),
+            create_transaction("2", 500),
+            create_transaction("3", 200),
         ];
         let other_chain = vec![
             Block::new(0, transactions.clone(), String::new(), 1),
@@ -234,16 +229,8 @@ mod tests {
     fn test_try_replace_chain_with_shorter_chain() {
         let mut blockchain = Blockchain::new(1);
 
-        blockchain.mine_block(vec![Transaction::new(
-            "0".to_string(),
-            "1".to_string(),
-            800,
-        )]);
-        blockchain.mine_block(vec![Transaction::new(
-            "3".to_string(),
-            "4".to_string(),
-            100,
-        )]);
+        blockchain.mine_block(vec![create_transaction("1", 800)]);
+        blockchain.mine_block(vec![create_transaction("4", 400)]);
 
         let other_chain = vec![blockchain.chain[0].clone()];
 
@@ -256,16 +243,8 @@ mod tests {
     fn test_try_replace_chain() {
         let mut blockchain = Blockchain::new(1);
 
-        blockchain.mine_block(vec![Transaction::new(
-            "0".to_string(),
-            "1".to_string(),
-            800,
-        )]);
-        blockchain.mine_block(vec![Transaction::new(
-            "1".to_string(),
-            "2".to_string(),
-            400,
-        )]);
+        blockchain.mine_block(vec![create_transaction("1", 800)]);
+        blockchain.mine_block(vec![create_transaction("2", 500)]);
 
         let other_chain = blockchain.chain.clone();
         blockchain.chain.remove(2);

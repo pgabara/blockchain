@@ -10,8 +10,8 @@ use std::sync::Arc;
 pub trait Broadcaster {
     fn broadcast_peer_list(
         &self,
-        peers: &[Peer],
         cluster_peers: Vec<Peer>,
+        peers: &[Peer],
     ) -> impl Future<Output = Result<(), BroadcasterError>> + Send;
 
     fn broadcast_new_block(
@@ -49,8 +49,8 @@ where
 {
     async fn broadcast_peer_list(
         &self,
-        peers: &[Peer],
         cluster_peers: Vec<Peer>,
+        peers: &[Peer],
     ) -> Result<(), BroadcasterError> {
         let cluster_peers: Vec<_> = cluster_peers.iter().map(|p| p.addr).collect();
         tracing::debug!(?peers, "Broadcasting the peer list");
@@ -120,10 +120,65 @@ async fn sync_transaction<C: Client>(
 }
 
 #[cfg(test)]
+pub mod test_utils {
+    use crate::blockchain::Block;
+    use crate::node::broadcast::{Broadcaster, BroadcasterError};
+    use crate::node::peer::Peer;
+    use crate::transaction::Transaction;
+    use tokio::sync::Mutex;
+
+    pub struct MockBroadcaster {
+        pub peer_list: Mutex<Option<Vec<Peer>>>,
+        pub new_block: Mutex<Option<Block>>,
+        pub transaction: Mutex<Option<Transaction>>,
+    }
+
+    impl MockBroadcaster {
+        pub fn new() -> Self {
+            Self {
+                peer_list: Mutex::new(None),
+                new_block: Mutex::new(None),
+                transaction: Mutex::new(None),
+            }
+        }
+    }
+
+    impl Broadcaster for MockBroadcaster {
+        async fn broadcast_peer_list(
+            &self,
+            cluster_peers: Vec<Peer>,
+            _peers: &[Peer],
+        ) -> Result<(), BroadcasterError> {
+            self.peer_list.lock().await.replace(cluster_peers);
+            Ok(())
+        }
+
+        async fn broadcast_new_block(
+            &self,
+            block: &Block,
+            _peers: &[Peer],
+        ) -> Result<(), BroadcasterError> {
+            self.new_block.lock().await.replace(block.clone());
+            Ok(())
+        }
+
+        async fn broadcast_transaction(
+            &self,
+            transaction: Transaction,
+            _peers: &[Peer],
+        ) -> Result<(), BroadcasterError> {
+            self.transaction.lock().await.replace(transaction);
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
 mod test {
     use super::*;
     use crate::network::client::test_utils::TestClient;
     use crate::node::peer::Peer;
+    use crate::transaction::test_utils::create_transaction;
 
     #[tokio::test]
     async fn test_return_error_on_invalid_response() {
@@ -135,7 +190,7 @@ mod test {
         let peers = vec![Peer::new(peer_1)];
         let cluster_peers = vec![Peer::new(peer_1), Peer::new(peer_2)];
 
-        let response = broadcaster.broadcast_peer_list(&peers, cluster_peers).await;
+        let response = broadcaster.broadcast_peer_list(cluster_peers, &peers).await;
         assert!(response.is_err());
     }
 
@@ -153,7 +208,7 @@ mod test {
         let cluster_peers = vec![Peer::new(peer_1), Peer::new(peer_2), Peer::new(peer_3)];
 
         let response = broadcaster
-            .broadcast_peer_list(&peers, cluster_peers.clone())
+            .broadcast_peer_list(cluster_peers.clone(), &peers)
             .await;
         assert!(response.is_ok());
 
@@ -178,10 +233,7 @@ mod test {
         let peer_2 = ([0, 0, 0, 0], 52002).into();
         let peers = vec![Peer::new(peer_1), Peer::new(peer_2)];
 
-        let transactions = vec![
-            Transaction::new("0".to_string(), "1".to_string(), 800),
-            Transaction::new("1".to_string(), "2".to_string(), 500),
-        ];
+        let transactions = vec![create_transaction("1", 800), create_transaction("2", 500)];
         let block = Block::new(1, transactions, "".to_string(), 1);
 
         let response = broadcaster.broadcast_new_block(&block, &peers).await;
@@ -203,7 +255,7 @@ mod test {
         let peers = vec![];
         let cluster_peers = vec![Peer::new(([0, 0, 0, 0], 52001).into())];
 
-        let response = broadcaster.broadcast_peer_list(&peers, cluster_peers).await;
+        let response = broadcaster.broadcast_peer_list(cluster_peers, &peers).await;
         assert!(response.is_ok());
 
         let requests = client.requests.lock().await;
@@ -216,10 +268,7 @@ mod test {
         let client = Arc::new(client);
         let broadcaster = NodeBroadcaster::new(Arc::clone(&client));
 
-        let transactions = vec![
-            Transaction::new("0".to_string(), "1".to_string(), 800),
-            Transaction::new("1".to_string(), "2".to_string(), 500),
-        ];
+        let transactions = vec![create_transaction("1", 800), create_transaction("2", 500)];
         let block = Block::new(1, transactions, "".to_string(), 1);
 
         let response = broadcaster.broadcast_new_block(&block, &[]).await;

@@ -1,7 +1,6 @@
 pub mod helpers;
 
-use blockchain::transaction::Transaction;
-use helpers::{client, retry, server};
+use helpers::{client, retry, server, transaction};
 
 #[tokio::test]
 async fn get_empty_chain() {
@@ -20,15 +19,15 @@ async fn get_empty_chain() {
 async fn get_non_empty_chain() {
     let server = server::start_node().await;
 
-    let transaction1 = Transaction::new("s1".to_string(), "r1".to_string(), 200);
+    let transaction1 = transaction::create_transaction("r1", 200);
     let is_transaction_added = client::add_transaction(transaction1.clone(), server.addr).await;
     assert!(is_transaction_added);
 
-    let transaction2 = Transaction::new("s2".to_string(), "r2".to_string(), 500);
+    let transaction2 = transaction::create_transaction("r2", 500);
     let is_transaction_added = client::add_transaction(transaction2.clone(), server.addr).await;
     assert!(is_transaction_added);
 
-    let transaction3 = Transaction::new("s3".to_string(), "r3".to_string(), 800);
+    let transaction3 = transaction::create_transaction("r3", 800);
     let is_transaction_added = client::add_transaction(transaction3.clone(), server.addr).await;
     assert!(is_transaction_added);
 
